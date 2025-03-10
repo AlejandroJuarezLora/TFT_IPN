@@ -1,0 +1,23 @@
+Simulación en SmartSpice
+
+Va a contener dos archivos para hacer simulación
+AOSTFT_isai_140623_V5.in (IN File) (Donde se describen los elementos a simular)
+AOSTFT_VLG_rel1023_E.va (VA File) (Se encuentra la descripción del Modelo, no tocar)
+
+
+Archivo-Abrir-elegimos el archivo (.in)
+-----------
+se hacen cambios al archivo, desde ingresar parametros del modelo, elementos circuitales y el tipo de simulación requerida. 
+
+Configuración de simulación. Se muestran las fuentes de alimentación, la polarizaciones que se requieren en la simulación por ejemplo la transferencial lineal (.dc vgg -4 5 0.05 vdd 0.1 0.1 0). Se grafica la corriente Ids del dispositivo YVLGT, como ejemplo. 
+Para realizar la simulación, hay que guardar (icono disket-Azul), compilar (icono con una S)y correr (Icono triangulo verde), ver Imagen 4, iconos encerrados en circulos negros. 
+
+Se muestra el resultado de la simulación en un nuevo Software, (SmartView)
+En circulo rojo, uno puede desglozar el contenido de la simulación y extrar los datos en ver datos (circulo azul)
+------------------------------------------------------------------
+
+Se agrega en la carpeta archivo en Mathcad donde curvas obtenidas experimentalmente son procesadas mediante el UMEM por optimización. 
+Archivo: AOSTFT_isai_140623_MC_V5
+
+
+

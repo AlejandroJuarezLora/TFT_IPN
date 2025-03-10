@@ -1,0 +1,428 @@
+// Silvaco Verilog-A implementation of AOS-TFT UMEM Model 
+//
+// AOSTFT_VLG_rel1023_E.va   ACTUALIZADO EL 11/23
+//
+// CONSIDERA LAS RESISTENCIAS S/R COMO ELEMENTOS EXTERNOS
+
+	`include "constants.h"
+	`include "discipline.h"
+
+// For Berkeley Spice compatibility we define 
+	// `define M_PI        	(3.14159265358979323846)	
+	// `define P_CELSIUS0  	(273)
+	// `define P_K         	(1.3806226e-23)  	// Boltzmann's constant [eV/K]
+	// `define P_Q         	(1.6021918e-19)  	// Charge - [Coulomb]	
+	`define m0          	(0.91093897E-30) 	// electron mass - [kg]
+	// `define P_H         	(6.6260755E-34)  	// Planck's constant [J*s]
+	`define P_ESi       	(1.0359431E-10)  	//  Silicon Permittivity [F/m]
+	`define P_EOX       	(3.453143E-11)   	// Silicon-Oxide Permittivity [F/m]
+	`define P_E0        	(8.854214871e-12)	// Vaccum permitivity [F/m]
+
+// Definition of the module, with its 3 terminals
+	module TFT(drain,  gate,  source);
+
+// The following three nodes are declared as input/output ("inout")
+  	inout  drain,  gate,  source;
+
+// These nodes will be accessed under the "electrical" discipline
+   	electrical drain,  gate,  source;
+
+// Internal nodes
+  	electrical si, di;
+   	electrical sp, dp;
+
+//Definition of the model parameters
+	parameter real TNOM		=27;		// Measurement temperature [C]
+	parameter real TYPE		=1 	from[-1:1] exclude 0; //1 N-TYPE, -1  P-TYPE 
+	
+	parameter real L 		=0	from[0.0:inf];		// channel length [m]
+	parameter real W		=0	from[0.0:inf];	   	// channel width [m]
+	parameter real TOX		=0;		// Dielectric layer thickness [m]
+	parameter real TSI 		=0;   	// Semiconductor layer thickness [m]
+	parameter real TPAS 	=0;   	// Passivation layer thickness [m]
+	parameter real LOVDS	=0;   	// Drain overlap [m]
+	parameter real LOVTDS=0;  	// Top-overlap at drain [m] 	
+	parameter real EPS		=0;		// Relative dielectric constant of semiconductor
+	parameter real EPSI		=0;		// Relative dielectric constant of gate dielectric
+	parameter real EPSPAS	=0;		// Relative dielectric constant of passivation dielectric
+
+//	MODEL PARAMETERS FOR I-V CHARACTERISTICS	
+//	PARAMETERS ABOVE VT	
+	parameter real MU1		=0;		// Mobility at (Vg-Vt)=1
+	parameter real VT0		=0;		// Threshold voltage [V] 
+	parameter real GAMMA	=0;		// Mobility factor 
+	parameter real ALPHAS	=0;		// Saturation factor (for currents)
+	parameter real RD		=0.0;	// Series resistance at drain [Ohms]
+	parameter real RS		=0.0;	// Series resistance at source [Ohms]
+	parameter real M		=0;		// Knee of output characteristics parameter
+	parameter real LAMBDA	=0;		// Output conductance factor [1/V]
+	parameter real DELTA	=0;		// Adjust of Vt in saturation
+	
+// 	PARAMETERS IN SUBTHRESHOLD
+	parameter real VFB		=0;		// Flat-band voltage
+	parameter real GAMMAB	=0;		
+	parameter real MUB1		=0;		// Mobility at Vg=Vt+1
+	parameter real S		=0;		// Sunthreshold slope in the linear transfer 
+	parameter real I0		=0; 	// Minimum of current in linear transfer [A]
+
+// 	PARAMETERS IN TANG-HIPERBOLIC FUNCTION (transition parameters) FOR CURRENTS
+	parameter real V1A		=0.0;	// subthreshold-subthreshold
+	parameter real V1		=0.0;	// subthreshold-subthreshold	
+	parameter real Q1		=0.0;	// subthreshold-subthreshold	 
+	parameter real V2		=0.0;	// subthreshold-above threshold
+	parameter real Q2		=0.0;	// subthreshold-above threshold
+
+//	MODEL PARAMETERS FOR CAPACITANCE-VOLTAGE CHARACTERISTICS	
+// 	COMPLEMENTARY PARAMETERS FOR AOSTFT 
+	parameter real ALPHASS	=0;		// Saturation factor in saturation (for Capacitance)   
+	parameter real MM 		=0;	 		 	
+	parameter real DD 		=0;   	 	
+	parameter real CGGDEP	=0;   	// Cgg in depletion (measured or simulated)
+	parameter real CGGACU	=0;		// Cgg in accumulation (measured or simulated)
+	parameter real Cpar0	=0;
+	parameter real RDX   	= -99;	// gate resistance at drain
+	parameter real RSX   	= -99;  // gate resistance at source
+
+// 	PARAMETERS IN TANG-HIPERBOLIC FUNCTION (transition parameters) FOR CAPACITANCES
+	parameter real V3		=0.0;	
+	parameter real Q3		=0.0;	 
+	parameter real a		=0.0;
+	parameter real capmod	=0.0;	// capmod=0 calcultate capacitances; else not
+	parameter real VAC		=0.0;	
+
+// 	POLARIZATION IN LINEAR TRANSFER
+	parameter real  VDSlin	=0;
+
+//  -------  Definition of the variables used in the model-------------------------------
+//
+// INTERNAL VARIABLES
+	real 	EPSI0, EPS0, EPSPAS0;	
+	real 	TNOM0;
+	real 	VT,VT2,VTS,VA,R;
+
+// VOLTAGE RELATED VARIABLES
+	real 	Vgs,Vgsi,Vsisp,Vsps,Vgsp,Vgd,Vgdi,Vdidp,Vddp,Vgdp, Vdpsp,Vds;
+	real 	vgs, vgsi, vsisp, vsps,vgsp,vgd,vgdi,vdidp,vddp,vgdp,vdpsp,vds,vgspt,vgspt2,vdpsp0;
+	real 	vgt,vgt2,vgt22,vgf,vgff,vsate,vdse,vdse2,vsate2,mode,vsateP1,vsateN,vsate22,vdse22;	
+
+// VARIABLES FOR COMPLETE BELOW AND ABOVE REGIONS
+	real  	ibtat,ibta0,ibt,MUFET,MUFETB,res;
+	real  	k1,k2,k3,k4,k5,k6,k7,k8,k52,k62; 
+
+// OTHER VARIABLES REQUIRED
+	real 	VMIN, ZETA, Rtot;
+	real 	Cipas0,Cox,covds,covtds,Cptop;
+	real 	Kc,Ci,Cim,Cipas;
+	real 	A1, A2, A3, A4, A5,A12, A22, A32, A42, A52;
+	real 	cggA,cgdA,cgsA,cggF,cgdF,cgsF,covs,cddA,cdgA,cddF,cdgF;
+	real 	sqrtvg,sqrtvg2,sqrtvf,sqrtvg22; 
+   	real  	SourceResistance, SourceConductance;
+   	real  	DrainResistance,  DrainConductance;   
+   	real  	viss, vidd, Viss, Vidd;
+   	real  	iDrainConductance, iSourceConductance;
+	real 	VGC, ALPHAS2, AF, FF,fa,ALPHAS22;
+	real  	Da2g,Da3g,Da2d,Da3d,Dvgtg2,Dvdg,Dvdd,Dvgtg,Da2g2,Da3g2,Da2d2,Da3d2;
+	real  	Dvdg2,Dvdd2,Dvgtg22,Da5g,Da5d; 
+	
+//	-------- Definition of the variables to plot  -------------------------------   
+	
+	(* desc="demo" *) real CggP;
+	(* desc="demo" *) real CgdP;
+	(* desc="demo" *) real CgsP;
+	(* desc="demo" *) real CdgP;
+	(* desc="demo" *) real CddP;
+	(* desc="demo" *) real CdsP;
+	(* desc="demo" *) real CsgP;
+	(* desc="demo" *) real CsdP;
+	(* desc="demo" *) real CssP;
+	(* desc="demo" *) real Igd;
+	(* desc="demo" *) real Igs;
+   	(* desc="demo" *) real Ids;
+ 	(* desc="demo" *) real Idc;
+	(* desc="demo" *) real ibta;
+	(* desc="demo" *) real ibtS;
+	(* desc="demo" *) real Ibt;
+
+	(* desc="demo" *) real Qgd;
+	(* desc="demo" *) real Qgs;
+	
+//	---------   Program Start
+   analog 
+     begin 
+       	// initialization 
+       	@(initial_step)
+          begin
+
+//	----------Definition of the values for the constant variables --------
+	VMIN 		= 1e-6;
+	ZETA 		= 10;
+	TNOM0 		= TNOM+`P_CELSIUS0;
+	EPSI0 		= `P_E0 * EPSI;
+	EPS0 		= `P_E0 * EPS; 
+	EPSPAS0		= `P_E0 * EPSPAS;
+	Cim 		= EPSI0 /TOX;   	// F/m2
+	Cipas0		= EPSPAS0/TPAS;		// F/m2
+	Ci			= Cim*1e-4;   		// F/cm2
+	Kc			= (W/L)*Ci;  		// Current factor [F/cm2]
+	Cox			= Ci*W*L; 			// gate dielectric capacitance [F]
+	VT			= TYPE *VT0;
+	R		  	= RS+RD;			// resitencia total en serie que se pondra externa en S y D
+	VA			= VAC;					
+          end  						// end of initial_step
+
+	vdpsp  		= TYPE * V(dp,sp);
+	vgsp  		= TYPE * V(gate,sp);
+	vgdp  		= TYPE * V(gate,dp);
+	vsisp 		= TYPE * V(si,sp);
+	vdidp 		= TYPE * V(di,dp);
+	
+ //	Initialize node voltages
+        if (vds >= 0.0)
+          begin
+	     mode 	= 1;
+	     Vdpsp 	= vdpsp;
+	     Vgsp  	= vgsp;
+     	 Vgdp  	= vgdp;
+	     Vsisp 	= vsisp;
+	     Vdidp 	= vdidp;
+          end
+        else
+	  begin // reverse mode
+	     mode 	= -1;
+	     Vdpsp 	= -vdpsp;
+	     Vgsp  	= vgdp;
+     	 Vgdp  	= vgsp;
+	     Vsisp 	= vsisp;
+	     Vdidp 	= vdidp;
+	  end
+	
+//--------   Definition of the currents expressions
+
+//   VTS SUSTITUYE A VT EN LAS EXPRESIONES DE CORRIENTE PARA CONSIDERAR EL EFECTO DE Vds
+
+	VTS	= VT*(1+DELTA*(Vdpsp-VDSlin));
+
+	vgt 	= (VMIN/2)*(1+((Vgsp-VTS)/VMIN)+sqrt( (ZETA*ZETA)+pow((((Vgsp-VTS)/VMIN)-1),2)));
+	vgf 	= (VMIN/2)*(1+((Vgsp-VFB)/VMIN)+sqrt((ZETA*ZETA)+pow((((Vgsp-VFB)/VMIN)-1),2)));	
+	vgff 	= (VMIN/2)*(1+((VFB-VFB)/VMIN)+sqrt((ZETA*ZETA)+pow((((VFB-VFB)/VMIN)-1),2)));
+	vsate 	=  ALPHAS*vgt;
+
+	vdpsp0	= Vdpsp+0.001;   // para que no pase por Vd=0
+	vdse 	=  vdpsp0/(pow((1+(pow((vdpsp0/vsate),M))),(1/M)));
+
+//	-------------   USO DE LAS RESISTENCIAS EXTERNAS 
+//  sobreumbral
+	Idc		= (Kc*MU1*pow(vgt,(1+GAMMA)))*vdse*(1+LAMBDA*(Vdpsp-vdse));	
+//  subumbral
+
+	ibta	=  Kc*MUB1*(pow(vgf,(1+GAMMAB)))*VDSlin;
+	ibtat	=  Kc*MUB1*(pow(vgff,(1+GAMMAB)))*VDSlin;
+	ibtS	=  (ibtat)*exp(2.3*(Vgsp-VFB-V1A)/S);
+	k1		=  (1-tanh((Vgsp-VT-V1)*Q1))/2.0;
+	k2		=  (1+tanh((Vgsp-VT-V1)*Q1))/2.0;
+	ibt		=  (ibtS+I0)*k1 + (ibta)*k2;
+
+//  TOTAL CURRENT
+	k3		= (1-tanh((Vgsp-VT-V2)*Q2))/2.0;
+	k4		= (1+tanh((Vgsp-VT-V2)*Q2))/2.0;
+	Ids 	= (ibt)*k3 + (Idc)*k4;          
+
+//  CURRENTS IN BRANCHES 
+	if (mode > 0)
+	  I(dp, sp) 	<+ TYPE * Ids;
+	else
+	  I(dp, sp) 	<+ -TYPE * Ids;
+
+//	---Definition of the resistances as external elements: RS, RD, RSX, RDX
+	     	     
+	if(RS != 0.0)
+		  SourceConductance = 1.0 / RS;
+	else
+		  SourceConductance = 0.0;
+
+	if(RD != 0.0)
+		  DrainConductance = 1.0 / RD;
+	else
+		  DrainConductance = 0.0;	
+	    		  
+	if(RSX > 0.0)
+		  iSourceConductance = 1.0 / RSX;
+	else
+		  iSourceConductance = 0.0;
+	 		  
+	if(RDX > 0.0)
+		  iDrainConductance = 1.0 / RDX;
+	else
+		  iDrainConductance = 0.0;
+
+//	currents  drain/source resistance
+	if ( RD > 0.0 )
+	  I(drain, dp)   <+ DrainConductance  * V(drain, dp);
+	else
+	  V(drain, dp)   <+ 0.0;
+
+	if ( RS > 0.0 )
+	  I(sp, source) <+ SourceConductance * V(sp, source);
+	else
+	  V(sp, source) <+ 0.0;
+	
+// 	currents RSX/RDX resistance
+	if ( RDX > 0.0 )
+	  I(gate, di)  <+ iDrainConductance  * V(gate, di);
+	else
+	  V(gate, di)  <+ 0.0;
+	
+	if ( RSX > 0.0 )
+	  I(gate, si) <+ iSourceConductance * V(gate, si);
+	else
+	  V(gate, si) <+ 0.0;
+
+//  ********************************************************************
+
+//   ***************   CAPACITANCES   ***************
+//
+//	----Definition of the extrinsic Capacitances (Overlaps)
+
+	covds 	= Ci*W*(LOVDS);			//capacitancia de overlap en drain
+	//covs 	= Ci*W*(LOVS);			//capacitancia de overlap en source
+	//cov 	= covd + covs;			//capacitancia de overlap total D+S
+
+	covtds	= Cipas0*W*(LOVTDS);	//capacitancia de top overlap en drain
+	//covts	= Cipas0*W*(LOVTS);		//capacitancia de top overlap en source
+	//covt 	= covtd + covts;		//capacitancia total de top overlap D+S
+	
+//-----------Definition of the capacitances expressions
+
+	if (capmod==0.0)
+  	begin
+		if(Vdpsp==0.0)
+		Vdpsp=Vdpsp+0.01;
+
+	VGC		= (1/ALPHASS)*Vdpsp+VT;    // voltaje de cambio de pendiente
+
+//----------------------SIN AJUSTE DE VG (VA)-----------------------------------------
+
+	vgspt		=Vgsp;   	// sin ajuste de Vg
+	k5			=(1-tanh((vgspt-VGC)*0.5))/2.0;
+	k6			=(1+tanh((vgspt-VGC)*0.5))/2.0;
+	ALPHAS2		=ALPHAS*k5 + ALPHASS*k6;	
+
+	VT2			= VT-DD*Vdpsp;
+	sqrtvg2		=  sqrt( (ZETA*ZETA) + pow(((vgspt-VT2)/VMIN)-1, 2));
+	vgt2 		= (VMIN/2)*(1+((vgspt-VT2)/VMIN)+sqrtvg2);
+
+	vsate2 		=  ALPHAS2 * vgt2;
+	vdse2 		=  Vdpsp / (pow((1+(pow((Vdpsp/vsate2),M))),(1/M)));
+	
+	sqrtvg	= sqrt((ZETA*ZETA)+pow(((Vgsp-VTS)/VMIN)-1,2));
+	Dvgtg	= 0.5*(1+((((Vgsp-VTS)/VMIN)-1)/sqrtvg));
+
+	Dvgtg2		= 0.5* ( 1+ ((((vgspt-VT2)/VMIN)-1)  / sqrtvg2) );
+	Dvdg		= ALPHAS2*Dvgtg2 *pow((Vdpsp/vsate2),(M+1)) / (pow((1	+(pow((Vdpsp/vsate2),M))),((1/M)+1)));
+	Dvdd		= 1/(pow((1+(pow((Vdpsp/vsate2),M))),((1/M)+1)));
+
+	A1			= pow(vgt2,(1+GAMMA)) - pow((vgt2-vdse2),(1+GAMMA));
+	A2			= pow(vgt2,(2+GAMMA)) - pow((vgt2-vdse2),(2+GAMMA));
+	A3  		= pow(vgt2,(3+GAMMA))  -pow((vgt2-vdse2),(3+GAMMA));
+	A4  		= pow(vgt2,(4+GAMMA*2))  -pow((vgt2-vdse2),(4+GAMMA*2));
+	A5  		= pow(vgt2,(5+GAMMA*2))  -pow((vgt2-vdse2),(5+GAMMA*2));
+	
+	Da2g		= (2+GAMMA) * ( A1*Dvgtg2 + pow((vgt2-vdse2),(1+GAMMA))*Dvdg );
+	Da3g		= (3+GAMMA) * ( A2*Dvgtg2 + pow((vgt2-vdse2),(2+GAMMA))*Dvdg );	
+	Da2d		= (2+GAMMA)*Dvdd*pow((vgt2-vdse2),(1+GAMMA));
+	Da3d		= (3+GAMMA)*Dvdd*pow((vgt2-vdse2),(2+GAMMA));
+
+	cggA		= Ci*((2+GAMMA)/(3+GAMMA))*(1/A2)*( Da3g-(A3/A2)*Da2g );
+	
+//  ----CON AJUSTE DE VG VA)--------
+
+	vgspt2		= Vgsp+VA;   			// con ajuste de Vg
+	sqrtvg22	=  sqrt( (ZETA*ZETA) + pow(((vgspt2-VT2)/VMIN)-1, 2));
+	vgt22 		=  (VMIN/2)*(1+((vgspt2-VT2)/VMIN)+sqrtvg2);
+	vsate22 	=  ALPHAS2 * vgt22;
+	vdse22 		=  Vdpsp / (pow((1+(pow((Vdpsp/vsate22),M))),(1/M)));
+
+	Dvgtg22		= 0.5* (1+ ((((vgspt2-VT2)/VMIN)-1)  / sqrtvg22));
+	Dvdg2		= ALPHAS2*Dvgtg22*pow((Vdpsp/vsate22),(M+1))/(pow((1+(pow((Vdpsp/vsate22),M))),((1/M)+1)));
+	Dvdd2		=  1/(pow((1+(pow((Vdpsp/vsate22),M))),((1/M)+1)));
+
+	A12			= pow(vgt22,(1+GAMMA)) - pow((vgt22-vdse22),(1+GAMMA));
+	A22			= pow(vgt22,(2+GAMMA)) - pow((vgt22-vdse22),(2+GAMMA));
+	A32  		= pow(vgt22,(3+GAMMA))  -pow((vgt22-vdse22),(3+GAMMA));
+	A42  		= pow(vgt22,(4+GAMMA*2))  -pow((vgt22-vdse22),(4+GAMMA*2));
+	A52  		= pow(vgt22,(5+GAMMA*2))  -pow((vgt22-vdse22),(5+GAMMA*2));
+	
+	Da2g2		= (2+GAMMA) * (A12*Dvgtg22 + pow((vgt22-vdse22),(1+GAMMA))*Dvdg2);
+	Da3g2		= (3+GAMMA) * (A22*Dvgtg22 + pow((vgt22-vdse22),(2+GAMMA))*Dvdg2);	
+	Da2d2		= (2+GAMMA)*Dvdd2*pow((vgt22-vdse22),(1+GAMMA));
+	Da3d2		= (3+GAMMA)*Dvdd2*pow((vgt22-vdse22),(2+GAMMA));
+
+	cgdA		= -Ci*((2+GAMMA)/(3+GAMMA))*(1/A22)*(Da3d2-(A32/A22)*Da2d2);
+
+//------------------------------------------------
+
+	k7			= (1-tanh((Vgsp-V3)*Q3))/2.0;
+	k8			= (1+tanh((Vgsp-V3)*Q3))/2.0;
+	fa			= a*(1-tanh((vgspt-VGC)*0.5))/2.0;
+	FF			= 1-Vdpsp*fa;
+
+	cggF		= cggA*FF+2*covds+Cpar0+Cptop;
+	cgdF		= cgdA*FF+1*covds+Cpar0*0.5+3*Cptop;
+	Cptop		= covtds*(pow(Vdpsp,0.8)-pow(0.01,0.8))*MM;
+
+	CggP		= CGGDEP *k7+ (cggF) *k8;   
+ 	CgdP		= 0.6*(CGGDEP/2*k7  + (cgdF) *k8);
+ 	CgsP		= 0.6*(CggP - CgdP); 
+	
+	Qgd 		= CgdP *vdidp;  
+	Qgs 		= CgsP *vsisp; 
+
+//----------------CAPACITANCIAS ASOCIADAS AL DRAIN----------------------
+
+  	Da5g		=(5+2*GAMMA)*( A4*Dvgtg2+pow((vgt2-vdse2),(4+2*GAMMA))*Dvdg );
+	Da5d		=(5+2*GAMMA)*pow((vgt22-vdse22),(4+2*GAMMA))*Dvdd2;
+
+	cdgA		= ( (Ci*(2+GAMMA))/(pow(A2,2))  )*( (Da5g/(5+2*GAMMA)) - ((2+GAMMA)/(3+GAMMA))*pow(vgt2,(1+GAMMA))*A3*Dvgtg2 - (pow(vgt2,(2+GAMMA))/(3+GAMMA))*Da3g - ( (A5/(5+2*GAMMA))-(pow(vgt2,(2+GAMMA))*A3)/(3+GAMMA) )*(2/A2)*Da2g );
+	cddA		= ( (Ci*(2+GAMMA))/(pow(A22,2)) )*( (pow(vgt22,(2+GAMMA))/(3+GAMMA))*( Da3d2-((2*A32)/A22)*Da2d2 )-(1/(5+2*GAMMA))*( Da5d-((2*A52)/A22)*Da2d2 )  );
+	cdgF		= -cdgA*FF+covds+3*Cptop+Cpar0*0.5;
+	cddF		= -cddA*FF+1*covds+Cpar0*0.5+3*Cptop;
+	CdgP		= CGGDEP/2*k7    + (cdgF)  *k8;   
+ 	CddP		= CGGDEP/2*k7    + (cddF)  *k8;
+
+//-----------------CAPACITANCIAS DEPENDIENTES-------------------------------
+
+	CdsP		=CdgP-CddP;
+	CsgP		= CggP-CdgP;
+	CsdP		= -(CddP-CgdP);
+	CssP		= CsgP-CsdP;
+
+end      		//if (capmod)
+
+	Igs 		= TYPE * ddt(Qgs);
+	Igd 		= TYPE * ddt(Qgd);
+	I(di,dp)  	<+ Igd;
+	I(si,sp)   	<+ Igs;
+
+ 	end					//analog block
+endmodule
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

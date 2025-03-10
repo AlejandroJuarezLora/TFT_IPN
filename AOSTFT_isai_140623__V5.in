@@ -1,0 +1,86 @@
+ -- UMEM in Verilog-A for AOS TFT --
+* muestra V140623 18/10/23 con va I V3
+
+.verilog "AOSTFT_VLG_rel1023_E.va"
+
+.options veriloga-args="-debug"
+.options va_mode=helpmod
+.options nopage nomod acct expert=3 WARNLIMIT=5 NUMDGT=9   ITL2=500
+.options DCGMIN=1.0e-8 DCGMSTEPS=10
+.options method=gear
+
+YVLGT_N1    1  2  3     T1  
+RC 		   	    3  0      0
+
+.model  T1  VLG  module=TFT
+ (
++TYPE		=1				
++TNOM		=27
++L			=40e-6
++W			=160e-6
++TOX		=22e-9  
++TSI		=15e-9  
++TPAS		=400e-9
++LOVDS		=5e-6
++LOVTDS		=5e-6
++EPS		=9
++EPSI		=7
++EPSPAS		=3.9
+
+**MODEL PARAMETERS PREVIOUSLY EXTRACTED  **   
+** sobreumbral
++MU1		=8.98
++VT0		=-2.27
++GAMMA		=0.259
++RS			=75			
++RD         =75		
++ALPHAS		=0.727
++M			=1.63
++LAMBDA		=-0.0569
++DELTA		=0
+
+** subumbral
++MUB1		=3.81
++GAMMAB		=0.76
++VFB		=-2.89
++S			=0.237
++V1A		=-1.793
++V1			=-0.47
++Q1			=33.7
++V2			=1.11
++Q2			=0.66
++I0			=5E-13
++VDSlin		=0.1
+
+** capacitancias
++V3			=0
++Q3			=0
++ALPHASS	=0
++CGGDEP		=4.1e-12    
++CGGACU		=19.6e-12
++MM			=0.0
++a			=0.00
++DD			=0.0
++VAC		=0.
++ capmod 		=param_capmod )
+
+.param param_capmod = 1
+
+vdd   1  0    0.001
+vgg   2  0    0
+
+.dc vgg -4  5   0.05   vdd 0.1 0.1   0
+
+.dc vdd  0  5    0.05   vgg 3  5   1                                                                                                                                                                   
+
+.iplot @YVLGT_N1[Ids] 
+
+
+*@YVLGT_N1[I(drain,dp)]  @YVLGT_N1[I(sp,source)] 
+*.iplot  @YVLGT_N1[CggP]   @YVLGT_N1[CgdP] @YVLGT_N1[CgsP]
+*.iplot  @YVLGT_N1[CggP]    @YVLGT_N1[CgdP]   @YVLGT_N1[CgsP]
+* @YVLGT_N1[Igs]  @YVLGT_N1[Igd] 
+*.iplot  @YVLGT_N1[CdgP]    @YVLGT_N1[CddP]   @YVLGT_N1[CdsP]
+*.iplot  @YVLGT_N1[CsgP]    @YVLGT_N1[CsdP]   @YVLGT_N1[CssP]
+
+.end
